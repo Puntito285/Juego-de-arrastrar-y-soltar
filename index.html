@@ -1,0 +1,610 @@
+ index.html juego de arrastrar y soltar
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Puntitos · Braille · Editor + Juego</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#111827; --ink:#e5e7eb; --muted:#94a3b8;
+    --accent:#22c55e; --accent-2:#38bdf8; --wrong:#ef4444; --ok:#10b981;
+    --card:#0b1220; --border:#1f2937;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:system-ui, Segoe UI, Arial;background:var(--bg);color:var(--ink)}
+  .stage{max-width:1280px;margin:0 auto;padding:8px}
+  .frame16x9{
+    position:relative; margin:0 auto; background:#0b1020; border:1px solid var(--border); border-radius:16px; overflow:hidden;
+    aspect-ratio:16/9; width:100%;
+  }
+  .topbar{
+    position:absolute; inset:0 auto auto 0; right:0; height:48px; display:flex; align-items:center; gap:.5rem;
+    padding:0 .75rem; background:rgba(5,10,20,.7); backdrop-filter:blur(8px); border-bottom:1px solid var(--border); z-index:10;
+  }
+  .topbar .spacer{flex:1}
+  .badge{font-size:.85rem;color:var(--muted); padding:.2rem .6rem; border:1px dashed #334155; border-radius:999px}
+  button{background:#1f2937;color:var(--ink);border:1px solid #334155;border-radius:10px;padding:.55rem .8rem;cursor:pointer}
+  button.primary{background:linear-gradient(180deg, #22c55e, #16a34a); border-color:#14532d}
+  button.warn{background:linear-gradient(180deg, #ef4444, #dc2626); border-color:#7f1d1d}
+  button.ghost{background:transparent;border-color:#334155}
+  button[disabled]{opacity:.5;pointer-events:none}
+  .layout{
+    position:absolute; inset:48px 0 28px 0; display:grid; grid-template-columns: 320px 1fr 320px; gap:8px; padding:8px;
+  }
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:10px; min-height:0; overflow:auto}
+  .panel h3{margin:.2rem 0 .5rem; font-size:1rem; color:#cbd5e1}
+  .legend{font-size:.85rem;color:var(--muted)}
+  .row{display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin:.5rem 0}
+  input[type="text"], input[type="file"], select, textarea{
+    background:#0b1220;color:var(--ink);border:1px solid var(--border);border-radius:10px;padding:.5rem .6rem; width:100%;
+  }
+  textarea{min-height:110px; resize:vertical}
+  .only-play{display:none}
+  .only-edit{display:none}
+  body[data-mode="edit"] .only-edit{display:initial}
+  body[data-mode="play"] .only-play{display:initial}
+  body[data-mode="play"] .hide-in-play{display:none !important}
+
+  /* Teléfono 9:16 */
+  .phone{
+    position:relative; margin:auto; height:100%; display:grid; place-items:center;
+  }
+  .phone-inner{
+    position:relative; background:linear-gradient(180deg,#0a0f1a,#0a1020); border:1px solid var(--border); border-radius:22px; overflow:hidden;
+    aspect-ratio:9/16; height:96%; max-height:100%;
+    box-shadow:0 12px 40px rgba(0,0,0,.45);
+    width: auto;
+  }
+  .bg-banner{
+    position:absolute; left:4%; top:3%; width:92%; background:#0a0e19; border:1px solid #132033; border-radius:12px; overflow:hidden;
+    aspect-ratio:16/9; display:grid; place-items:center;
+  }
+  .bg-banner img{width:100%; height:100%; object-fit:cover}
+  .targets{
+    position:absolute; inset:0; pointer-events:none;
+  }
+  .target{
+    position:absolute; left:20%; top:50%; width:60%; height:10%; border:2px dashed #475569; border-radius:12px;
+    color:#a5b4fc; display:flex; align-items:center; justify-content:center; background:rgba(11,17,30,.35);
+    pointer-events:auto;
+  }
+  .target.correct{border-color:var(--ok)}
+  .target.wrong{border-color:var(--wrong)}
+  .t-label{
+    position:absolute; left:6px; top:-22px; font-size:.75rem; color:#cbd5e1; background:#0b1220; padding:.1rem .35rem; border-radius:6px; border:1px solid #243244;
+  }
+  .t-accept{
+    position:absolute; right:6px; top:-22px; font-size:.7rem; padding:.1rem .35rem; border-radius:6px; border:1px solid #243244; background:#08101d; color:#93c5fd;
+  }
+
+  /* Handles de edición */
+  .handle{position:absolute; width:12px; height:12px; background:#38bdf8; border:2px solid #0b1220; border-radius:50%}
+  .h-nw{left:-6px; top:-6px} .h-ne{right:-6px; top:-6px}
+  .h-sw{left:-6px; bottom:-6px} .h-se{right:-6px; bottom:-6px}
+
+  /* Generador Braille y construcción */
+  .ui-area{
+    position:absolute; left:4%; right:4%; bottom:3%; top: calc(3% + (92% * 9 / 16) + 10px); /* debajo del banner */
+    display:grid; grid-template-columns: 1fr; grid-template-rows: auto auto 1fr; gap:8px;
+  }
+  .braille, .builder, .guide{
+    background:#0b1220; border:1px solid #213147; border-radius:12px; padding:8px; overflow:auto;
+  }
+  .braille h4, .builder h4, .guide h4{margin:0 0 6px 0; font-size:.95rem}
+  .dots{display:grid; grid-template-columns:repeat(2, 42px); grid-auto-rows:42px; gap:8px; justify-content:start}
+  .dot{
+    width:42px;height:42px;border-radius:50%;display:grid;place-items:center; border:2px solid #334155; color:#9fb3c8; background:#0a1422; cursor:pointer; user-select:none;
+  }
+  .dot.active{background:linear-gradient(180deg,#38bdf8,#0ea5e9); color:#04131f; border-color:#0b1220; font-weight:700}
+  .builder .tray{display:flex; flex-wrap:wrap; gap:6px}
+  .chip{
+    display:inline-flex; align-items:center; gap:6px; padding:.35rem .55rem; border-radius:10px; border:2px solid #0b1220;
+    background:linear-gradient(180deg,#0f172a,#0b1220); color:#e5e7eb; font-weight:600; cursor:grab; user-select:none;
+  }
+  .chip .x{
+    width:18px;height:18px;border-radius:50%; background:#b91c1c; color:#fff; display:grid; place-items:center; font-size:.8rem; font-weight:700;
+  }
+  .guide-list{display:flex; gap:6px; flex-wrap:wrap}
+  .guide-tag{background:#122338; color:#cfe0ff; border:1px solid #223a5b; padding:.2rem .45rem; border-radius:999px; font-size:.8rem}
+
+  /* Drag en juego */
+  .drag-ghost{position:fixed; z-index:9999; pointer-events:none; transform:translate(-50%,-50%)}
+
+  /* Alumno y meta */
+  .student{
+    position:absolute; left:4%; right:4%; top: calc(3% + (92% * 9 / 16) + 10px); /* se superpone arriba de ui-area en play para ahorrar espacio */
+    display:flex; gap:6px; flex-wrap:wrap; background:rgba(8,14,24,.65); border:1px solid #1f2a3c; padding:6px; border-radius:10px;
+  }
+  .student input{flex:1; min-width:130px}
+  .clock{font-size:.85rem; color:#cbd5e1}
+
+  /* Footer */
+  .footer{
+    position:absolute; left:0; right:0; bottom:0; height:28px; display:flex; align-items:center; justify-content:center;
+    font-size:.8rem; color:#9fb3c8; border-top:1px solid var(--border); background:rgba(5,10,20,.7)
+  }
+
+  /* Responsive: en pantallas angostas oculta paneles laterales y centra el teléfono */
+  @media (max-width: 1000px){
+    .layout{grid-template-columns: 1fr; inset:48px 0 28px 0}
+    .panel.only-edit{display:none !important}
+  }
+</style>
+</head>
+<body data-mode="edit">
+<div class="stage">
+  <div class="frame16x9">
+    <div class="topbar">
+      <strong>Puntitos de Sabiduría · Braille</strong>
+      <span id="modeBadge" class="badge">Modo: Edición</span>
+      <div class="spacer"></div>
+      <button id="btnPlay" class="primary hide-in-play" type="button">Probar</button>
+      <button id="btnTeacher" class="only-play" type="button">Acceso maestras</button>
+    </div>
+
+    <div class="layout">
+      <!-- Panel izquierdo: fondo, guía, temas (solo edición) -->
+      <aside class="panel only-edit" aria-label="Configurar tema">
+        <h3>Fondo (banner pequeño)</h3>
+        <div class="legend">Sube una imagen. No ocupará todo el móvil, solo el banner.</div>
+        <div class="row"><input id="bgFile" type="file" accept="image/*" /></div>
+        <div class="row"><div id="bgThumb" style="width:100%; aspect-ratio:16/9; border:1px dashed #334155; border-radius:8px; display:grid; place-items:center; overflow:hidden">
+          <span class="legend">Sin imagen</span>
+        </div></div>
+
+        <h3>Guía de palabras</h3>
+        <div class="legend">Escribe libremente las palabras del tema (se muestran en Juego).</div>
+        <div class="row"><textarea id="guideText" placeholder="Ej.: animales, personas, árboles"></textarea></div>
+
+        <h3>Temas</h3>
+        <div class="row"><input id="themeName" type="text" placeholder="Nombre del tema" /></div>
+        <div class="row">
+          <button id="saveTheme" type="button">Guardar tema</button>
+          <button id="deleteTheme" class="warn" type="button">Eliminar tema</button>
+        </div>
+        <div class="row">
+          <select id="themeList"></select>
+          <button id="loadTheme" type="button">Cargar</button>
+        </div>
+
+        <h3>Zonas receptoras</h3>
+        <div class="legend">Añade y edita zonas dentro del móvil. Cada zona tiene una “Palabra objetivo”.</div>
+        <div class="row"><button id="addTarget" type="button">Añadir zona receptora</button></div>
+      </aside>
+
+      <!-- Teléfono 9:16 -->
+      <main class="phone">
+        <div class="phone-inner" id="phone">
+          <div class="bg-banner"><img id="bgImg" alt="Fondo del tema" /></div>
+          <div class="targets" id="targets"></div>
+
+          <!-- Datos del alumno (visible en juego) -->
+          <div class="student only-play">
+            <input id="stuName" type="text" placeholder="Nombre y apellido" />
+            <input id="stuDay" type="text" placeholder="Día de clase" />
+            <div class="clock" id="clock"></div>
+          </div>
+
+          <!-- Área de UI (generador, construcción, guía) -->
+          <section class="ui-area">
+            <div class="braille">
+              <h4>Signo generador</h4>
+              <div class="legend">Toca para activar/desactivar puntos. Izquierda 1,2,3 • Derecha 4,5,6.</div>
+              <div class="dots" id="dots">
+                <div class="dot" data-dot="1">1</div>
+                <div class="dot" data-dot="4">4</div>
+                <div class="dot" data-dot="2">2</div>
+                <div class="dot" data-dot="5">5</div>
+                <div class="dot" data-dot="3">3</div>
+                <div class="dot" data-dot="6">6</div>
+              </div>
+              <div class="row">
+                <button id="addLetter" type="button">Añadir letra</button>
+                <button id="clearDots" class="ghost" type="button">Limpiar</button>
+              </div>
+            </div>
+
+            <div class="builder">
+              <h4>Construir palabra</h4>
+              <div class="legend">Ve formando letras y luego crea una tarjeta.</div>
+              <div class="row"><div id="letters" class="tray" aria-label="Letras actuales"></div></div>
+              <div class="row">
+                <button id="makeCard" class="primary" type="button">Crear tarjeta</button>
+                <button id="clearLetters" class="ghost" type="button">Vaciar letras</button>
+              </div>
+              <div class="row"><div id="cards" class="tray" aria-label="Tarjetas creadas"></div></div>
+            </div>
+
+            <div class="guide">
+              <h4>Palabras del tema</h4>
+              <div id="guideList" class="guide-list"></div>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <!-- Panel derecho: ayuda rápida (edición) -->
+      <aside class="panel only-edit">
+        <h3>Edición rápida</h3>
+        <ul>
+          <li class="legend">Arrastra y redimensiona zonas desde las esquinas.</li>
+          <li class="legend">Haz clic en la etiqueta de la zona para cambiar su “Palabra objetivo”.</li>
+          <li class="legend">Todo se guarda automáticamente.</li>
+        </ul>
+        <h3>Vista previa</h3>
+        <div class="legend">Pulsa “Probar” o abre con <code>?mode=play</code>.</div>
+      </aside>
+    </div>
+
+    <div class="footer">Creado por Puntitos de Sabiduría</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const qs = s => document.querySelector(s);
+  const qsa = s => Array.from(document.querySelectorAll(s));
+
+  const state = {
+    mode: (new URLSearchParams(location.search).get('mode')) || localStorage.getItem('mode') || 'edit',
+    project: {
+      bg: null,             // dataURL imagen
+      guide: '',            // texto libre
+      targets: [],          // {id,x,y,w,h,label,accept}
+    },
+    themes: {},             // nombre -> project
+    letters: [],            // letras en construcción
+  };
+
+  // Mapa Braille (puntos -> letra) y reverso
+  const brailleMap = {
+    "1":"a","12":"b","14":"c","145":"d","15":"e","124":"f","1245":"g","125":"h","24":"i","245":"j",
+    "13":"k","123":"l","134":"m","1345":"n","135":"o","1234":"p","12345":"q","1235":"r","234":"s","2345":"t",
+    "136":"u","1236":"v","2456":"w","1346":"x","13456":"y","1356":"z"
+    // Nota: podemos añadir ñ y acentos más adelante si lo deseas.
+  };
+  const letterToDots = Object.fromEntries(Object.entries(brailleMap).map(([dots, l])=>[l,dots]));
+
+  function setMode(m, persist=true){
+    state.mode = m;
+    document.body.setAttribute('data-mode', m);
+    qs('#modeBadge').textContent = 'Modo: ' + (m==='edit'?'Edición':'Juego');
+    if(persist) localStorage.setItem('mode', m);
+    renderAll();
+  }
+
+  // Guardado/carga local
+  function saveProject(){
+    localStorage.setItem('puntitos_project', JSON.stringify(state.project));
+  }
+  function loadProject(){
+    const raw = localStorage.getItem('puntitos_project');
+    if(raw){ try{ state.project = JSON.parse(raw) } catch{} }
+  }
+  function saveThemes(){
+    localStorage.setItem('puntitos_themes', JSON.stringify(state.themes));
+  }
+  function loadThemes(){
+    const raw = localStorage.getItem('puntitos_themes');
+    if(raw){ try{ state.themes = JSON.parse(raw) } catch{} }
+  }
+
+  // Render
+  function renderAll(){
+    // Fondo
+    const bgImg = qs('#bgImg');
+    const thumb = qs('#bgThumb');
+    if(state.project.bg){
+      bgImg.src = state.project.bg;
+      thumb.innerHTML = '<img alt="Miniatura fondo" style="width:100%;height:100%;object-fit:cover;border-radius:6px" />';
+      thumb.firstChild.src = state.project.bg;
+    }else{
+      bgImg.removeAttribute('src');
+      thumb.innerHTML = '<span class="legend">Sin imagen</span>';
+    }
+
+    // Guía
+    qs('#guideText').value = state.project.guide || '';
+    const gl = qs('#guideList'); gl.innerHTML='';
+    (state.project.guide||'').split(/[,\n]/).map(s=>s.trim()).filter(Boolean).forEach(w=>{
+      const tag = document.createElement('div'); tag.className='guide-tag'; tag.textContent = w; gl.appendChild(tag);
+    });
+
+    // Targets
+    const container = qs('#targets'); container.innerHTML='';
+    state.project.targets.forEach(t=> container.appendChild(createTargetElement(t)));
+
+    // Panel temas
+    refreshThemeList();
+
+    // Builder
+    renderLetters();
+    renderCards();
+
+    // Topbar
+    qs('#btnPlay').classList.toggle('only-play', state.mode==='play');
+    qs('#btnTeacher').classList.toggle('only-play', state.mode==='edit');
+
+    // Student info
+    qs('.student')?.classList.toggle('only-play', state.mode!=='play');
+
+    // Activar/ocultar handles
+    qsa('.target').forEach(el=>{
+      el.querySelectorAll('.handle').forEach(h=> h.style.display = (state.mode==='edit'?'block':'none'));
+      el.contentEditable = (state.mode==='edit');
+    });
+  }
+
+  function createTargetElement(t){
+    const el = document.createElement('div');
+    el.className = 'target';
+    el.style.left = t.x + '%';
+    el.style.top = t.y + '%';
+    el.style.width = t.w + '%';
+    el.style.height = t.h + '%';
+    el.dataset.id = t.id;
+
+    const lab = document.createElement('div');
+    lab.className = 't-label';
+    lab.textContent = t.label || 'Zona';
+    lab.addEventListener('click', (e)=> e.stopPropagation());
+
+    const acc = document.createElement('div');
+    acc.className = 't-accept';
+    acc.textContent = t.accept ? ('Objetivo: ' + t.accept) : 'Objetivo: —';
+    acc.title = 'Haz clic para editar Objetivo';
+    acc.addEventListener('click', (e)=>{
+      if(state.mode!=='edit') return;
+      e.stopPropagation();
+      const val = prompt('Palabra objetivo para esta zona:', t.accept||'');
+      if(val !== null){
+        t.accept = val.trim();
+        acc.textContent = t.accept ? ('Objetivo: ' + t.accept) : 'Objetivo: —';
+        saveProject();
+      }
+    });
+
+    el.appendChild(lab);
+    el.appendChild(acc);
+
+    // Handles de edición
+    ['nw','ne','sw','se'].forEach(pos=>{
+      const h = document.createElement('div'); h.className='handle h-'+pos; h.title='Redimensionar';
+      el.appendChild(h);
+    });
+
+    // Drag/resize en edición
+    if(state.mode==='edit'){
+      enableTargetEdit(el, t);
+    }
+
+    // Drop en juego
+    if(state.mode==='play'){
+      enableDrop(el, t);
+    }
+
+    return el;
+  }
+
+  function enableTargetEdit(el, t){
+    // Drag
+    let drag = null, resize = null;
+    el.addEventListener('pointerdown', (e)=>{
+      if(e.target.classList.contains('handle')){
+        const rect = el.getBoundingClientRect();
+        const parent = el.parentElement.getBoundingClientRect();
+        resize = {pos: e.target.className.match(/h-(\w+)/)[1], startX: e.clientX, startY: e.clientY,
+                  x: rect.left-parent.left, y: rect.top-parent.top, w: rect.width, h: rect.height, parent};
+      }else{
+        const rect = el.getBoundingClientRect();
+        const parent = el.parentElement.getBoundingClientRect();
+        drag = {dx: e.clientX-rect.left, dy: e.clientY-rect.top, parent};
+      }
+      el.setPointerCapture(e.pointerId);
+    });
+    el.addEventListener('pointermove', (e)=>{
+      const parent = el.parentElement.getBoundingClientRect();
+      if(drag){
+        let nx = e.clientX - drag.parent.left - drag.dx;
+        let ny = e.clientY - drag.parent.top - drag.dy;
+        nx = Math.max(0, Math.min(nx, parent.width - el.offsetWidth));
+        ny = Math.max(0, Math.min(ny, parent.height - el.offsetHeight));
+        const xp = nx/parent.width*100, yp = ny/parent.height*100;
+        el.style.left = xp+'%'; el.style.top = yp+'%';
+      }
+      if(resize){
+        let {pos, startX, startY, x, y, w, h, parent: p} = resize;
+        let dx = e.clientX-startX, dy = e.clientY-startY;
+        let nx=x, ny=y, nw=w, nh=h;
+        if(pos.includes('e')) nw = Math.max(30, w+dx);
+        if(pos.includes('s')) nh = Math.max(24, h+dy);
+        if(pos.includes('w')){ nx = x+dx; nw = Math.max(30, w-dx); }
+        if(pos.includes('n')){ ny = y+dy; nh = Math.max(24, h-dy); }
+        nx = Math.max(0, Math.min(nx, p.width-30)); ny = Math.max(0, Math.min(ny, p.height-24));
+        el.style.left = (nx/p.width*100)+'%';
+        el.style.top = (ny/p.height*100)+'%';
+        el.style.width = (nw/p.width*100)+'%';
+        el.style.height = (nh/p.height*100)+'%';
+      }
+    });
+    el.addEventListener('pointerup', (e)=>{
+      if(drag || resize){
+        updateTargetFromStyle(el, t);
+        saveProject();
+      }
+      drag=null; resize=null;
+      el.releasePointerCapture(e.pointerId);
+    });
+    // Click para editar etiqueta
+    el.addEventListener('dblclick', ()=>{
+      if(state.mode!=='edit') return;
+      const val = prompt('Etiqueta de la zona:', t.label||'Zona');
+      if(val!==null){
+        t.label = val.trim();
+        el.querySelector('.t-label').textContent = t.label || 'Zona';
+        saveProject();
+      }
+    });
+  }
+
+  function updateTargetFromStyle(el, t){
+    const parent = el.parentElement.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    t.x = (r.left - parent.left)/parent.width*100;
+    t.y = (r.top - parent.top)/parent.height*100;
+    t.w = r.width/parent.width*100;
+    t.h = r.height/parent.height*100;
+  }
+
+  // Generador Braille
+  function getActiveDots(){
+    const dots = qsa('.dot.active').map(d=> parseInt(d.dataset.dot,10)).sort((a,b)=>a-b);
+    return dots.join('');
+  }
+  function clearDots(){ qsa('.dot').forEach(d=> d.classList.remove('active')); }
+  function addCurrentLetter(){
+    const dots = getActiveDots();
+    if(!dots){ alert('Selecciona al menos un punto.'); return; }
+    const letter = brailleMap[dots] || '?';
+    state.letters.push({dots, letter});
+    clearDots();
+    renderLetters();
+  }
+  function renderLetters(){
+    const box = qs('#letters'); box.innerHTML='';
+    state.letters.forEach((l,i)=>{
+      const ch = document.createElement('div'); ch.className='chip'; ch.textContent = l.letter;
+      ch.title = 'Puntos: '+l.dots;
+      ch.addEventListener('click', ()=>{ state.letters.splice(i,1); renderLetters(); });
+      box.appendChild(ch);
+    });
+  }
+  function clearLetters(){ state.letters=[]; renderLetters(); }
+
+  // Tarjetas (palabras)
+  function renderCards(){
+    const cards = qs('#cards'); cards.innerHTML='';
+    // Persistidas en project? Las tarjetas de práctica no se guardan; el alumno crea las suyas en juego.
+  }
+  function makeCardFromLetters(){
+    if(!state.letters.length){ alert('Primero añade letras'); return; }
+    const text = state.letters.map(x=>x.letter).join('');
+    const chip = createCardChip(text);
+    qs('#cards').appendChild(chip);
+    clearLetters();
+  }
+  function createCardChip(text){
+    const chip = document.createElement('div'); chip.className='chip'; chip.setAttribute('draggable','false');
+    const x = document.createElement('div'); x.className='x'; x.textContent='×';
+    x.title='Eliminar tarjeta';
+    x.addEventListener('click', (e)=>{ e.stopPropagation(); chip.remove(); });
+    chip.append(text, x);
+    // Hacer arrastrable (con ghost) para soltar en zona
+    chip.addEventListener('pointerdown', e=>{
+      const ghost = chip.cloneNode(true);
+      ghost.classList.add('drag-ghost');
+      ghost.style.left = e.clientX+'px'; ghost.style.top = e.clientY+'px';
+      document.body.appendChild(ghost);
+      function move(ev){ ghost.style.left = ev.clientX+'px'; ghost.style.top = ev.clientY+'px'; highlightDrop(ev.clientX, ev.clientY); }
+      function up(ev){
+        const t = getDropAt(ev.clientX, ev.clientY);
+        if(t){ handleDrop(t, text); }
+        ghost.remove(); clearHighlights();
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+      }
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+    });
+    return chip;
+  }
+
+  function getDropAt(x,y){
+    const els = qsa('.target');
+    for(const el of els){
+      const r = el.getBoundingClientRect();
+      if(x>=r.left && x<=r.right && y>=r.top && y<=r.bottom) return el;
+    }
+    return null;
+  }
+  function highlightDrop(x,y){
+    clearHighlights();
+    const t = getDropAt(x,y);
+    if(t) t.classList.add('drop-hl');
+  }
+  function clearHighlights(){ qsa('.drop-hl').forEach(el=> el.classList.remove('drop-hl')); }
+  function handleDrop(targetEl, text){
+    const t = state.project.targets.find(z=> z.id===targetEl.dataset.id);
+    if(!t) return;
+    const accept = (t.accept||'').trim().toLowerCase();
+    const got = String(text||'').trim().toLowerCase();
+    if(accept && got === accept){
+      targetEl.classList.remove('wrong'); targetEl.classList.add('correct');
+    }else{
+      targetEl.classList.remove('correct'); targetEl.classList.add('wrong');
+      // No bloqueamos, solo feedback.
+    }
+  }
+
+  // Drop en juego (también permite soltar cualquier tarjeta)
+  function enableDrop(el, t){
+    // No necesitamos listeners adicionales aquí; getDropAt/handleDrop lo resuelve.
+  }
+
+  // Controles UI
+  function bindUI(){
+    // Modo
+    qs('#btnPlay').addEventListener('click', ()=> setMode('play'));
+    qs('#btnTeacher').addEventListener('click', ()=>{
+      const p = prompt('Contraseña de maestras:');
+      if(p==='maestra123') setMode('edit');
+      else alert('Contraseña incorrecta');
+    });
+
+    // Fondo
+    qs('#bgFile').addEventListener('change', async (e)=>{
+      const f = e.target.files[0]; if(!f) return;
+      const data = await fToDataURL(f);
+      state.project.bg = data; saveProject(); renderAll();
+    });
+
+    // Guía
+    qs('#guideText').addEventListener('input', (e)=>{
+      state.project.guide = e.target.value; saveProject(); renderAll();
+    });
+
+    // Temas
+    qs('#saveTheme').addEventListener('click', ()=>{
+      const name = (qs('#themeName').value||'').trim();
+      if(!name) return alert('Pon un nombre al tema');
+      state.themes[name] = JSON.parse(JSON.stringify(state.project));
+      saveThemes(); refreshThemeList(name); alert('Tema guardado');
+    });
+    qs('#loadTheme').addEventListener('click', ()=>{
+      const sel = qs('#themeList').value; if(!sel) return;
+      const proj = state.themes[sel]; if(!proj) return;
+      state.project = JSON.parse(JSON.stringify(proj));
+      saveProject(); renderAll(); alert('Tema cargado');
+    });
+    qs('#deleteTheme').addEventListener('click', ()=>{
+      const sel = qs('#themeList').value; if(!sel) return;
+      if(confirm('¿Eliminar tema "'+sel+'"?')){
+        delete state.themes[sel]; saveThemes(); refreshThemeList();
+      }
+    });
+
+    // Zonas
+    qs('#addTarget').addEventListener('click', ()=>{
+      const id='t_'+Math.random().toString(36).slice(2,8);
+      const t = {id, x:20, y:55, w:60, h:10, label:'Zona', accept:''};
+      state.project.targets.push(t); saveProject(); renderAll();
+    });
+
+    // Dots
+    qsa('.dot').forEach(d=> d.addEventListener('click', ()=> d.classList.toggle('active')));
+    qs('#addLetter').addEventListener('click', addCurrentLetter);
+    qs('#clearDots').addEventListener('click', clearDots);
+    qs('#makeCard').addEventListener('click', makeCardFromLetters);
+    qs('#clearLetters
